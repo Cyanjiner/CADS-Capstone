@@ -1,0 +1,601 @@
+---
+title: "excess_deaths2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r our world in data, include=FALSE}
+library(dplyr)
+library(readr)
+#library(fpp2)
+#library(forecast)
+#library(tseries) # for adf.test() 
+#library(FinTS) # for ArchTest()
+#library(vrtest) # for Auto.AR()
+#library(vars)
+#library(MTS)
+#library(tsbox)
+library(plotly)
+library(gghighlight)
+library(tidyverse)
+```
+
+```{r load data, include=FALSE}
+# load our world in data
+owid_covid_data <- read.csv("data/owid-covid-data.csv")
+covid_general <- owid_covid_data %>% 
+  dplyr::select(iso_code, continent, location,date, total_vaccinations, people_vaccinated, stringency_index, population, population_density, median_age, aged_65_older, aged_70_older, gdp_per_capita, extreme_poverty, life_expectancy, cardiovasc_death_rate, diabetes_prevalence, handwashing_facilities, hosp_patients, hospital_beds_per_thousand)
+# load climate data
+climate_zones <- read.csv("data/climate zones - Munka1.csv") %>% dplyr::select(-1)
+climate_zones[climate_zones$Country.Region=="US",]$Country.Region<-"United States"
+names(climate_zones)[1] <- "location"
+# World Value Survey
+WVS <- read.csv2("data/WVSextra.csv")
+names(WVS) <- c("location",'social_utility','conformity','trust','compliance')
+# Legatum Institue's 2019 Prosperity Index
+prosperity <-  read.csv("data/Prosperity Index_2019_Data_szerk.csv", sep=";")
+names(prosperity)[1] <- "location"
+url2 = "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/excess_mortality/excess_mortality.csv"
+excess_mortality <- read_csv(url(url2))
+```
+
+```{r separate ts and non-ts, include=FALSE}
+covid_general <- left_join(prosperity,covid_general, by=c("location"="location"))
+covid_general <- left_join(covid_general, climate_zones, by=c("location"="location"))
+length(unique(covid_general$location))
+# filter our ts object
+covid_general_ts <- covid_general %>% dplyr::select(location, iso_code, continent,date, stringency_index, total_vaccinations,people_vaccinated, hosp_patients)
+
+#covid_general <- left_join(WVS, covid_general, by=c("location"="location"))
+# number of countries
+length(unique(covid_general$location)) #60
+# filter out non ts objects
+covid_no_ts <- covid_general %>% dplyr::select(-c("date","stringency_index","total_vaccinations","people_vaccinated","hosp_patients","handwashing_facilities","hospital_beds_per_thousand")) %>% distinct()
+```
+
+```{r World Mortality Dataset, eval=FALSE, echo=FALSE, include=FALSE}
+# World Mortality Dataset
+url = "https://raw.githubusercontent.com/akarlinsky/world_mortality/main/world_mortality.csv"
+excess_death <- read_csv(url(url)) 
+excess_death_sub <- excess_death %>%  filter(country_name %in% covid_general$location) #filter out selected country --> 90 left
+length(unique(excess_death$country_name)) #116 countries
+monthly <- excess_death %>% filter(time_unit=="monthly")
+weekly <- excess_death %>% filter(time_unit=="weekly")
+# lastest updated time by country
+latest_date <- excess_death %>% 
+  group_by(country_name) %>% 
+  summarize(end_year=max(year),
+            end_time=max(excess_death[excess_death$country_name==country_name & excess_death$year==end_year,]$time),
+            after_covid_end_time = max(excess_death[excess_death$country_name==country_name & excess_death$year==2019,]$time),
+            frequency=unique(excess_death[excess_death$country_name==country_name,]$time_unit))
+```
+
+```{r excess mortality, eval=FALSE, echo=FALSE, include=FALSE}
+excess_mortality_timeseries <- read_csv("excess-mortality-main/excess-mortality-timeseries.csv")
+em <- excess_mortality_timeseries %>%  filter(country_name %in% covid_general$location)
+length(unique(em$country_name)) #91 countries
+
+# lastest updated time by country
+em_latest_date <- em %>% 
+  group_by(country_name) %>% 
+  summarize(end_year=max(year),
+            end_time=max(em[em$country_name==country_name & em$year==end_year,]$time),
+            frequency=unique(em[em$country_name==country_name,]$time_unit))
+```
+
+```{r function to get time series by country (weekly), eval=FALSE, echo=FALSE}
+get_weekly_time_series <- function(country){
+  country_subset <- weekly %>% filter(country_name == country)
+  min_year = min(country_subset$year)
+  min_time = min(country_subset[country_subset$year==min_year,]$time)
+  all_ts <- ts(country_subset$deaths, frequency = 52,start = c(min_year,min_time)) # transform to time series (all time period)
+  return(all_ts)
+}
+```
+
+```{r test for US normality, eval=FALSE, echo=FALSE, include=FALSE}
+us_ts = get_weekly_time_series("United States")
+test_normality(us_ts,"US")
+ # p < .05 --> not normal
+```
+
+```{r test for stationarity, eval=FALSE, echo=FALSE,include=FALSE}
+us_ts2 <- BoxCox(us_ts,BoxCox.lambda(us_ts)) #not normal so need boxcox transformation
+test_weekly_stationarity(us_ts2,"US")
+# P <.05 --> stationary
+# slow tapering in ACF
+# p=2, P=0
+```
+
+```{r select ARIMA or SARIMA, eval=FALSE, echo=FALSE,include=FALSE}
+us_sub <- window(us_ts,end=c(2019,52)) # to estimate the expected deaths, we do not yet consider time periods after COVID-19
+(arima_us <- Arima(us_sub, 
+                   order = c(2,0,0),
+                   seasonal = list(order=c(0,1,0),
+                                   period=52))) #AIC=3449.19
+checkresiduals(arima_us)
+(sarima_us <- auto.arima(us_sub, trace = F,
+                          stepwise = T, #for faster stepwise selection
+                          seasonal = T)) # allows for seasonal models
+#SARIMA(1,0,0)(1,1,0)[52]: AIC 3406.46
+checkresiduals(sarima_us) #Ljung p<.05
+```
+
+```{r, eval=FALSE, echo=FALSE,include=FALSE}
+length(us_ts)-length(us_sub)
+expected_us <- forecast(sarima_us,h=111)
+expected_us_ts <- expected_us$mean
+us_sub2 <- window(us_ts,start=c(2020,1))
+excess_us <- us_sub2 - expected_us_ts
+autoplot(expected_us, main="US Expected Mortality: ARIMA(2,0,2)(0,1,1)[52]", xlab="Year",series="Expected Deaths",ylab="Number of Deaths")+autolayer(us_sub2, series = "Reported Deaths")+autolayer(expected_us$mean, series="Expected Deaths")+theme_minimal()
+```
+
+## clustering excess deaths alone (using Euclidean distance)
+
+```{r load excess mortality data from owid, include=FALSE}
+excess_mortality <- excess_mortality %>% 
+  mutate(month = as.numeric(substr(date,6,7)),
+         year = as.numeric(substr(date,1,4)),
+         year_month = substr(date,1,7))
+
+# transfer all weekly to monthly (aggregate)
+excess_mortality2 <- excess_mortality %>% 
+  filter(location %in% covid_general$location) %>% 
+  dplyr::select(location, date, year_month, year, month, excess_proj_all_ages,deaths_2020_2022_all_ages, projected_deaths_2020_2022_all_ages) %>%
+  group_by(location, year_month, year, month) %>% 
+  summarise(excess_deaths = sum(excess_proj_all_ages),
+            reported_deaths = sum(deaths_2020_2022_all_ages),
+            projected_deaths = sum(projected_deaths_2020_2022_all_ages),
+            .groups="keep") %>% 
+  drop_na() %>% 
+  mutate(time_unit = as.numeric(sub("-",".",year_month)),
+         p_score = excess_deaths/projected_deaths)
+```
+
+```{r filter out latest date, include=FALSE}
+library(zoo) # for date operations
+update_time = excess_mortality2 %>% group_by(location) %>% summarise(latest_date = max(time_unit),earliest = min(time_unit)) # choose update time since 2020/01 until 2021/12
+selected_country = (update_time %>% filter(latest_date >= 2021.12 & earliest == 2020.01))$location
+
+# keep all selected countries, filter out data after 2021/12
+ex_country <- excess_mortality2 %>% 
+  filter(location %in% selected_country & time_unit <= 2021.12) %>% 
+  arrange(time_unit) %>% 
+  mutate(date = as.Date(as.yearmon(year_month,"%Y-%m")))
+```
+
+### Plotting excess deaths in all country
+
+-   69 countries were included after merging with other available datasets
+
+-   Last updated date was selected to be December 2021
+
+-   All excess deaths by country were aggregated into monthly values
+
+```{r plot gghighlight, echo=FALSE}
+ggplot(ex_country, aes(date, excess_deaths,color=location)) +
+  geom_line(stat="identity") +
+  ylab("Projected Excess Deaths") +
+  gghighlight(max(excess_deaths) > 90000,
+              max_highlight = 4,
+              use_direct_label = TRUE) +
+  theme_minimal() +
+  theme(legend.position = 'none')
+```
+
+```{r plot brazil}
+ggplot(ex_country[ex_country$location=="Brazil",], aes(date, excess_deaths)) +
+  geom_line(stat="identity") +
+  ylab("Projected Excess Deaths")+
+  theme_minimal() 
+```
+
+
+```{r plot p-score}
+ggplot(ex_country, aes(date, p_score,color=location)) +
+  geom_line(stat="identity") +
+  ylab("P-score of Excess Deaths") +
+  gghighlight(max(p_score) > 2,
+              max_highlight = 4,
+              use_direct_label = TRUE) +
+  theme_minimal() +
+  theme(legend.position = 'none')
+```
+
+
+```{r long to wide, include=FALSE}
+# exclude France because missing data from 2020/05 - 2021-10
+ex_per_country <- ex_country[ex_country$location != "France",c("excess_deaths","time_unit","location")]
+  
+# long to wide
+ex_per_country <- ex_per_country %>% 
+  spread(location, excess_deaths)
+```
+
+### Fitting Hierarchical clustering using Euclidean distance
+
+```{r fit hierarchical cusltering, include=FALSE}
+# transpose excess deaths to matrix
+deaths <- t(ex_per_country[-1])
+deaths_dist <- proxy::dist(deaths, method="Euclidean")
+ex_cluster_fit <- hclust(deaths_dist, method = "ward.D")
+```
+
+### Clustered Excess Deaths Dendrogram (Euclidean)
+
+```{r plot dendrogram, include=FALSE}
+# plot clusters
+ggdendro::ggdendrogram(ex_cluster_fit, rotate=TRUE, theme_dendro = FALSE) + theme_minimal() + xlab("") + ylab("")
+```
+
+```{r merge cluster to full data, include=FALSE}
+#assign the four clusters to the data using cutree() 
+clustered_ex <- cutree(ex_cluster_fit, k=4)
+clustered_exdata <- as.data.frame(as.table(clustered_ex))
+colnames(clustered_exdata) <- c("location","cluster")
+clustered_exdata$location <- as.character(clustered_exdata$location)
+joined_clusters <- ex_country %>% 
+  inner_join(clustered_exdata, by = "location")
+```
+
+```{r plot excess deaths cluster2, include=FALSE}
+# cluster1
+cluster1 <-
+ggplot(joined_clusters %>% filter(cluster == "1") , aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales = "free")
+# cluster2
+cluster2 <- joined_clusters %>% filter(cluster == "2") %>% 
+ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location)
+# cluster3
+cluster3 <- joined_clusters %>% filter(cluster == "3") %>% ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location) 
+# cluster4
+cluster4 <- joined_clusters %>% filter(cluster == "4") %>% ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location)
+```
+
+### Plot each cluster
+
+```{r plot excess deaths cluster3, include=FALSE}
+# how many countries per cluster
+table(clustered_exdata$cluster)
+cluster1
+cluster2
+cluster3
+cluster4
+```
+
+## Clustering Excess Deaths using Dynamic Time Warp (DTW)
+
+### Fit dtw hierarchical clustering
+```{r long to wide2, include=FALSE}
+# exclude France because missing data from 2020/05 - 2021-10
+ex_per_country <- ex_country[ex_country$location != "France",c("p_score","time_unit","location")]
+  
+# long to wide
+ex_per_country <- ex_per_country %>% 
+  spread(location, p_score)
+```
+
+### Fitting Hierarchical clustering using Euclidean distance
+
+```{r dtw hierarchical clustering}
+deaths <- t(ex_per_country[-1])
+# normalize data
+deaths.norm <- BBmisc::normalize(deaths, method="standardize")
+deaths_dist_norm <- dtw::dtwDist(deaths.norm) # calculate dtw distance
+deaths_dist_norm <- as.dist(deaths_dist_norm) # convert to dist object
+ex_cluster_fit2 <- hclust(deaths_dist_norm, method = "ward.D")
+
+ex_dendrogram<- ggdendro::ggdendrogram(ex_cluster_fit2, rotate=TRUE, theme_dendro = FALSE) + theme_minimal() + xlab("") + ylab("")
+ex_dendrogram
+```
+
+```{r pick number of cluster for excess deaths}
+library(cluster)
+deaths_sil_width <- c(NA)
+for(i in 2:8){  
+  deaths_pam_fit <- pam(deaths_dist_norm, diss = TRUE, k = i)  
+  deaths_sil_width[i] <- deaths_pam_fit$silinfo$avg.width  
+}
+plot(1:8, deaths_sil_width,
+     xlab = "Number of clusters",
+     ylab = "Silhouette Width")
+lines(1:8, deaths_sil_width)
+```
+
+```{r merge cluster to ex_country data, include=FALSE}
+#assign the four clusters to the data using cutree() 
+clustered_ex2 <- cutree(ex_cluster_fit2, k=6)
+
+clustered_exdata2 <- as.data.frame(as.table(clustered_ex2))
+
+colnames(clustered_exdata2) <- c("location","cluster")
+# how many countries per cluster
+table(clustered_exdata2$cluster)
+
+clustered_exdata2$location <- as.character(clustered_exdata2$location)
+
+joined_clusters2 <- ex_country %>% 
+  inner_join(clustered_exdata2, by = "location")
+```
+
+```{r count by ex class}
+joined_clusters2[,c("location","cluster")] %>% 
+  distinct() %>% 
+  mutate(cluser=as.factor(cluster)) %>% 
+  group_by(cluster) %>% 
+  summarise(count=n())
+```
+
+
+### plot each cluster
+
+```{r dtw excess deaths cluster 1}
+ex_cluster1 <- joined_clusters2 %>% filter(cluster == "1") %>% 
+  ggplot(aes(date, p_score)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free",ncol = 5)+
+  ggtitle("P-scores of Excess Deaths Cluster 1")+
+  theme(strip.text.y = element_text(size=2),
+        strip.text.x = element_text(size=0.5))
+ggplotly(ex_cluster1)
+```
+
+```{r dtw excess deaths cluster 2}
+ex_cluster2 <- joined_clusters2 %>% filter(cluster == "2") %>% 
+  ggplot(aes(date, p_score)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("P-scores of Excess Deaths Cluster 2")
+ggplotly(ex_cluster2)
+```
+
+```{r dtw excess deaths cluster 3}
+ex_cluster3 <- joined_clusters2 %>% filter(cluster == "3") %>% 
+  ggplot(aes(date, p_score)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("P-scores of Excess Deaths Cluster 3")
+ggplotly(ex_cluster3)
+```
+
+```{r dtw excess deaths cluster 4, eval=FALSE}
+ex_cluster4 <- joined_clusters2 %>% filter(cluster == "4") %>% 
+  ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales = "free")+
+  ggtitle("Excess Deaths Cluster 4")
+ggplotly(ex_cluster4)
+```
+
+```{r dtw excess deaths cluster 5, eval=FALSE}
+ex_cluster5 <- joined_clusters2 %>% filter(cluster == "5") %>% 
+  ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales = "free")+
+  ggtitle("Excess Deaths Cluster 5")
+ggplotly(ex_cluster5)
+```
+
+```{r dtw excess deaths cluster 6, eval=FALSE}
+ex_cluster6 <- joined_clusters2 %>% filter(cluster == "6") %>% 
+  ggplot(aes(date, excess_deaths)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("excess deaths") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales = "free")+
+  ggtitle("Excess Deaths Cluster 6")
+ggplotly(ex_cluster6)
+```
+
+```{r merge excess deaths class to original data,include=FALSE}
+ex_class <- joined_clusters2 %>% 
+  group_by(location) %>% 
+  summarise(excess_death_class = unique(cluster))
+
+covid_no_ts_all <- left_join(ex_class, covid_no_ts,by = "location")
+```
+
+## clustering policy stringency alone
+
+```{r data management for stringency data, include=FALSE}
+stringency <- covid_general_ts %>% dplyr::select(location, date, stringency_index) %>% 
+  filter(location %in% ex_class$location) %>% 
+  mutate(year_month = substr(date,1,7),
+         time_unit = as.numeric(sub("-",".",year_month))) %>% 
+  drop_na()
+# look at earliest and latest time in all country
+summary((stringency %>% 
+  filter(!is.na(stringency_index)) %>% 
+  group_by(location) %>% 
+  summarise(latest_date = max(date),
+            earliest_date = min(date))))
+### --> choose 2020-03-18 as earliest date and 2022-01-24 as latest
+# compute stringency level by month (take the average)
+month_stringency <- stringency %>% 
+  group_by(location, year_month,time_unit) %>% 
+  summarise(monthly_stringency = mean(stringency_index),
+            .groups = "keep") %>% 
+  # filter out date after 2021/12
+  filter(time_unit <= 2021.12) %>% 
+  arrange(time_unit) %>% 
+  mutate(date = as.Date(as.yearmon(year_month,"%Y-%m")))
+```
+
+### Plotting policy stringency index by country
+
+```{r stringency plot gghighlight, echo=FALSE}
+ggplot(month_stringency, aes(date, monthly_stringency,color=location)) +
+  geom_line(stat="identity") +
+  ylab("Monthly Policy Stringency Index") +
+  gghighlight(max(monthly_stringency) > 95,
+              max_highlight = 4,
+              use_direct_label = TRUE) +
+  theme_minimal() +
+  theme(legend.position = 'none')
+```
+
+### Fit dtw hierarchical clustering and plot dendrogram
+
+```{r dtw hierarchical clustering for stringency}
+# long to wide
+stringency_per_country <- month_stringency[,c("monthly_stringency","time_unit","location")] %>% 
+  spread(location, monthly_stringency) %>% 
+  drop_na()
+policy <- t(stringency_per_country[-1])
+# normalize data
+policy.norm <- BBmisc::normalize(policy, method="standardize")
+policy_dist_norm <- dtw::dtwDist(policy.norm) # calculate dtw distance
+policy_dist_norm <- as.dist(policy_dist_norm) # convert to dist object
+policy_cluster_fit <- hclust(policy_dist_norm, method = "ward.D")
+policy_dendrogram <- ggdendro::ggdendrogram(policy_cluster_fit, rotate=TRUE, theme_dendro = FALSE) + theme_minimal() + xlab("") + ylab("")
+ggplotly(policy_dendrogram)
+```
+
+```{r pick number of cluster for policy}
+policy_sil_width <- c(NA)
+for(i in 2:8){  
+  policy_pam_fit <- pam(policy_dist_norm, diss = TRUE, k = i)  
+  policy_sil_width[i] <- policy_pam_fit$silinfo$avg.width  
+}
+plot(1:8, policy_sil_width,
+     xlab = "Number of clusters",
+     ylab = "Silhouette Width")
+lines(1:8, policy_sil_width)
+```
+
+
+```{r merge stringency cluster to full data, include=FALSE}
+#assign the four clusters to the data using cutree() 
+clustered_policy <- as.data.frame(as.table(cutree(policy_cluster_fit, k=3)))
+colnames(clustered_policy) <- c("location","cluster")
+# how many countries per cluster
+table(clustered_policy$cluster)
+clustered_policy$location <- as.character(clustered_policy$location)
+joined_clusters_policy <- month_stringency %>% 
+  inner_join(clustered_policy, by = "location")
+```
+
+```{r count by policy class}
+joined_clusters_policy[,c("location","cluster")] %>% 
+  distinct() %>% 
+  mutate(cluser=as.factor(cluster)) %>% 
+  group_by(cluster) %>% 
+  summarise(count=n())
+```
+
+### Plot policy stringency clusters
+
+```{r policy cluster 1}
+policy_cluster1 <-
+  joined_clusters_policy %>% filter(cluster == "1") %>% 
+  ggplot(aes(date, monthly_stringency)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("policy stringency") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("Policy Stringency Cluster 1")
+ggplotly(policy_cluster1)
+```
+
+```{r policy cluster 2}
+policy_cluster2 <-
+  joined_clusters_policy %>% filter(cluster == "2") %>% 
+  ggplot(aes(date, monthly_stringency)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("policy stringency") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("Policy Stringency Cluster 2")
+ggplotly(policy_cluster2)
+```
+
+```{r policy cluster 3}
+policy_cluster3 <-
+  joined_clusters_policy %>% filter(cluster == "3") %>% 
+  ggplot(aes(date, monthly_stringency)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("policy stringency") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("Policy Stringency Cluster 3")
+ggplotly(policy_cluster3)
+```
+
+```{r policy cluster 4, eval=FALSE}
+policy_cluster4 <-
+  joined_clusters_policy %>% filter(cluster == "4") %>% 
+  ggplot(aes(date, monthly_stringency)) +
+  geom_line(color="grey") +
+  theme_minimal() +
+  ylab("policy stringency") + xlab("") +
+  geom_smooth(method="auto",color="red", se=F, size=0.5) +
+  facet_wrap(~location, scales="free")+
+  ggtitle("Policy Stringency Cluster 4")
+ggplotly(policy_cluster4)
+```
+
+
+```{r merge stringency class to original data, eval=FALSE}
+policy_class <- joined_clusters_policy %>% 
+  group_by(location) %>% 
+  summarise(stringency_class = unique(cluster))
+
+covid_no_ts_all2 <- left_join(policy_class, covid_no_ts_all, by = "location")
+write.csv(covid_no_ts_all2,"data/covid_no_ts_all.csv")
+```
+
+```{r merge p-score cumulative, eval=FALSE}
+p_score_cum <- ex_country %>% 
+  group_by(location) %>% 
+  summarise(cum_p_score = sum(excess_deaths)/sum(reported_deaths))
+
+continent <- covid_general %>% 
+  select(location, iso_code, continent) %>% 
+  distinct()
+
+p_score_continent <- left_join(p_score_cum, continent, by='location')
+write.csv(p_score_continent, "data/p_score_continent.csv")
+write.csv(p_score_cum, "data/p_score_cum.csv")
+```
+

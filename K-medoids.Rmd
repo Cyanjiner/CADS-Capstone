@@ -1,0 +1,512 @@
+---
+title: "exploratory"
+author: "Jiner Zheng"
+date: '2022-04-19'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning=FALSE)
+```
+
+```{r load in data,echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(fmsb)
+country_profile <- read.csv("data/covid_no_ts_all.csv")[,-1]
+p_score_cum <- read.csv("data/p_score_cum.csv")[-1]
+country_profile <- left_join(country_profile, p_score_cum, by = 'location')
+```
+
+## Variables from Prosperity Index
+
+-   ***persfreedomagency:*** Pillar of Personal Freedom --\> the degree to which citizens are free from restriction and are free to move, indicating the experiences of the freedom to act independently and making free choices
+
+    -   its indicators consist of e.g. personal autonomy and individual rights, freedom of movement, satisfaction with freedom, etc.)
+
+-   ***Socialcapsocialnetwork:*** Social network (pillar of Social capital)
+
+    -   the strength and opportunities of the individuals' relationships with wider social network, including social support (e.g. respect, opportunity to make friends or helping another household)
+
+-   ***Healthprevent:*** Preventative interventions (pillar of Health)
+
+    -   the extent to which the health system prevents diseases and other medical complications from occurring (e.g. the existence of national screening programs, or diphteria, measles, hepatitis immunization, etc.)
+
+-   ***Socialcapcivic:*** Civic and social participation (pillar of Social capital)
+
+    -   the amount to which citizens participate within the society, split into the civic and social spheres (e.g. donated money to charity, volunteering, etc.)
+
+-   ***PersonalFreedom:*** Freedom of assembly and association (pillar of Personal Freedom)
+
+    -   the degree to which citizens have the freedom to assemble with others in public spaces, or to express their opinions
+
+-   ***GovernanGovernmeffect:*** Government effectiveness (pillar of Governance)
+
+    -   the quality of public health provision, the competence of officials and the quality of the bureaucracy (e.g. policy coordination, government quality and credibility, efficiency of government spending, etc.)
+
+-   ***Socialcappersonalandfamily:*** Personal and family relationships (pillar of Social capital)
+
+    -   the strength of the closest personal relationships and family ties, forming the individual's emotional, mental and financial support (e.g. help from family and friends when in trouble or the positive energy provided by the family)
+
+## Clustering using gower distance
+
+```{r data cleaning,echo=FALSE}
+library(cluster)
+country_profile <- country_profile %>% mutate(stringency_class = as.factor(stringency_class), excess_death_class = as.factor(excess_death_class), Climateclass = as.factor(Climateclass))
+data <- country_profile[,c(1:10,12:20,24,27)]
+data <- data[-18] # excluding extreme poverty becuz of missing values and Taiwan (missing values too many)
+data <- data[-16] # excluding aged_70_older
+data <- data[data$location != "Taiwan",]
+data[data$location == "Switzerland",]$Climateclass = "Class C - Temperate (Mesothermal) Climates"
+data[data$location == "Mongolia",]$Climateclass = "Class D - Continental (Microthermal) Climates"
+data[data$location == "Iceland",]$Climateclass = "Class C - Temperate (Mesothermal) Climates"
+data[data$location == "Guatemala",]$Climateclass = "Class A - Tropical Climates"
+data[data$location == "Kyrgyzstan",]$Climateclass = "Class C - Temperate (Mesothermal) Climates"
+## The northern part of Kyrgyzstan is located in the temperate climatic zone, while the southern part is subtropical
+data[data$location == "Mauritius",]$Climateclass = "Class A - Tropical Climates"
+data[data$location == "Paraguay",]$Climateclass = "Class C - Temperate (Mesothermal) Climates"
+## Two-thirds of Paraguay is within the temperate zone, one-third in the tropical zone
+data[data$location == "Bolivia",]$Climateclass = "Class A - Tropical Climates"
+data[data$location == "Seychelles",]$Climateclass = "Class A - Tropical Climates"
+data[data$location == "Hong Kong",]$Climateclass = "Class A - Tropical Climates"
+```
+
+```{r compute gower distance,echo=FALSE}
+# compute gower distance
+data <- mutate(data, continent=as.factor(continent))
+gower_dist <- daisy(data[-1], metric = "gower")
+gower_mat <- as.matrix(gower_dist)
+
+# print most similar locations
+kable(data[which(gower_mat == min(gower_mat[gower_mat != min(gower_mat)]), arr.ind = TRUE)[1,],])
+
+# print most dissimilar locations
+kable(data[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]), arr.ind = TRUE)[1, ], ])
+```
+
+Pick number of clusters using the silhouette figure
+
+```{r pick number of clusters,echo=FALSE}
+# using the silhouette figure to identify best option of number of clusters (2 to 8 maximum)
+sil_width <- c(NA)
+for(i in 2:8){
+  pam_fit <- pam(gower_dist, diss=TRUE, k=i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+
+plot(1:8, sil_width,
+     xlab="Number of clusters",
+     ylab="Silhouette Width")
+lines(1:8, sil_width)
+```
+
+
+*2 clusters has the highest silhouette width. 3 is simpler and almost as good. Let's pick k = 3*
+
+## Interpretation
+
+### Summary of each cluster
+
+```{r summary of each cluster, echo=FALSE}
+k <- 3
+pam_fit <- pam(gower_dist, diss = TRUE, k)
+# merge cluster classes to original data
+data2 <- data %>% 
+  mutate(cluster = pam_fit$clustering)
+pam_results <- data %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+pam_results$the_summary
+```
+
+```{r summary of all data}
+summary(data2)
+```
+
+```{r}
+clusplot(data, pam_fit$clustering, color=TRUE, shade = TRUE,labels=2, lines = 0, main="k=3")
+clusplot(data, (pam(gower_dist,diss = TRUE,4))$clustering, color=TRUE, shade = TRUE,labels=2, lines = 0, main="k=4")
+clusplot(data, (pam(gower_dist,diss = TRUE,5))$clustering, color=TRUE, shade = TRUE,labels=2, lines = 0, main="k=5")
+clusplot(data, (pam(gower_dist,diss = TRUE,2))$clustering, color=TRUE, shade = TRUE,labels=2, lines = 0, main="k=2")
+```
+
+```{r get numeric variables,echo=FALSE}
+# recode climate class
+data2_numeric <- data2 %>% 
+  dplyr::select(-c("stringency_class","excess_death_class","Climateclass","continent"))
+```
+
+```{r rescale data,echo=FALSE}
+# get rescaled data matrix of numeric variables using min-max difference normalization
+maxmin <- function(x){
+  x <- (x-min(x))/(max(x)-min(x))
+}
+data2_mat <- data2 %>% 
+  select(-c("location","stringency_class","excess_death_class","Climateclass","continent")) %>% 
+  sapply(maxmin) %>% 
+  as.data.frame() %>% 
+  mutate(cluster = data2$cluster) %>% 
+  group_by(cluster) %>% 
+  summarise(agency = median(persfreedomagency),
+            social_network = median(Socialcapsocialnetwork),
+            assembly_freedom = median(PersonalFreedom),
+            health_prevent = median(healthprevent),
+            social_civic = median(Socialcapcivic),
+            govern_effect = median(GovernanGovernmeffect),
+            family = median(Socialcappersonalandfamily),
+            population = median(population),
+            pop_density = median(population_density),
+            median_age = median(median_age),
+            aged_65_older = median(aged_65_older),
+            gdp = median(gdp_per_capita),
+            life_exp = median(life_expectancy),
+            cum_p_score = median(cum_p_score))  
+```
+
+### Cluster 1: 19 Countries
+
+```{r cluster 1 country list, echo=FALSE}
+kable(
+  (data2 %>% filter(cluster==1) %>% 
+  select(location, excess_death_class, stringency_class, Climateclass) %>% 
+  arrange(excess_death_class)), 
+  caption = "All Countries in Cluster 1")
+```
+
+```{r cluster1 excess death counts, echo=FALSE}
+kable(
+  list(
+  (data2 %>% filter(cluster==1) %>% 
+  group_by(excess_death_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==1) %>% 
+  group_by(stringency_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==1) %>% 
+  group_by(Climateclass) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==1) %>% 
+  group_by(continent) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts)))
+  ),
+  caption = "Cluster 1 Country counts",
+  booktabs=TRUE, valign='t')
+```
+
+#### Cluster 1 countries profile -- other variables
+
+-   58% (11/19 countries) in **Excess Death Class 4** *(e.g. Russia, Hungary, Ukraine)*
+
+-   63% (12/19 countries) in **Stringency Class 1**
+
+-   68% (13/19 countries) in **Temperate (Mesothermal) Climates**
+
+```{r cluster1,echo=FALSE}
+all_cluster1 <- data2_mat %>% 
+  filter(cluster==1) 
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+all_cluster1 <- rbind(rep(1,15) , rep(0,15) , all_cluster1)
+radarchart(all_cluster1[-1],axistype=1,
+           # custom polygon
+           pcol = rgb(0.2,0.5,0.5,0.9), pfcol =rgb(0.2,0.5,0.5,0.5), plwd=4,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=0.8,
+           # custom labels
+           vlcex = 0.7, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPreventions","Civic and Social\nParticipartion","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median Age","Aged 65 Older","GDP\nper capita","Life\nExpectancy",'Cumulative\nP-score\nExcess Deaths'),
+           calcex = 0.8, # font size of center axis labels
+           title="Cluster 1 Profile")
+```
+
+### Cluster 2: 27 Countries
+
+```{r cluster 2 country list, echo=FALSE}
+kable(
+  (data2 %>% filter(cluster==2) %>% 
+  select(location, excess_death_class, stringency_class, Climateclass) %>% 
+  arrange(excess_death_class)),
+  caption = "Cluster 2 All Countries")
+```
+
+-   Most in **Excess Death Class 1 & 2** *(e.g. Russia, Hungary, Ukraine)*
+
+-   48% in **Stringency Class 3**
+
+-   85% (23/27 countries) in **Temperate (Mesothermal) Climates**
+
+```{r}
+data2 %>% 
+  group_by(stringency_class,excess_death_class) %>% 
+  summarise(count=n())
+```
+
+
+```{r cluster2 excess death counts, echo=FALSE}
+kable(
+  list(
+  (data2 %>% filter(cluster==2) %>% 
+  group_by(excess_death_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==2) %>% 
+  group_by(stringency_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==2) %>% 
+  group_by(Climateclass) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==2) %>% 
+  group_by(continent) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts)))
+  ),
+  caption = "Cluster 2 Country counts",
+  booktabs=TRUE, valign='t')
+```
+
+#### Cluster 2 countries profile -- other variables
+
+```{r cluster2,echo=FALSE}
+all_cluster2 <- data2_mat %>% 
+  filter(cluster==2) 
+all_cluster2 <- rbind(rep(1,15) , rep(0,15) , all_cluster2)
+radarchart(all_cluster2[-1],axistype=1,
+           # custom polygon
+           pcol = 4, pfcol =rgb(0, 0.4, 1, 0.25), plwd=4,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=0.8,
+           # custom labels
+           vlcex = 0.7, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPreventions","Civic and Social\nParticipartion","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median Age","Aged 65 Older","GDP\nper capita","Life\nExpectancy",'Cumulative\nP-score\nExcess Deaths'),
+           calcex = 0.8, # font size of center axis labels
+           title="Cluster 2 Profile")
+```
+
+### Cluster 3: 20 Countries
+
+```{r cluster 3 country list, echo=FALSE}
+kable(
+  (data2 %>% filter(cluster==3) %>% 
+  select(location, excess_death_class, stringency_class, Climateclass) %>% 
+  arrange(excess_death_class)),
+  caption = "Cluster 3 All Countries")
+```
+
+```{r cluster3 excess death counts, echo=FALSE}
+kable(
+  list(
+  (data2 %>% filter(cluster==3) %>% 
+  group_by(excess_death_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==3) %>% 
+  group_by(stringency_class) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==3) %>% 
+  group_by(Climateclass) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts))),
+  (data2 %>% filter(cluster==3) %>% 
+  group_by(continent) %>% 
+  summarise(counts=n()) %>% 
+  arrange(desc(counts)))
+  ),
+  caption = "Cluster 3 Country counts",
+  booktabs=TRUE, valign='t')
+```
+
+#### Cluster 3 countries profile -- other variables
+
+```{r cluster3 radarchart,echo=FALSE}
+all_cluster3 <- data2_mat %>% 
+  filter(cluster==3) 
+all_cluster3 <- rbind(rep(1,15) , rep(0,15) , all_cluster3)
+radarchart(all_cluster3[-1],axistype=1,
+           # custom polygon
+           pcol = rgb(1, 0.4, 0.6, 0.9), pfcol =rgb(1, 0.4, 0.6, 0.25), plwd=4,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=0.8,
+           # custom labels
+           vlcex = 0.7, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPreventions","Civic and Social\nParticipartion","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median Age","Aged 65 Older","GDP\nper capita","Life\nExpectancy","Cumulative\nP-score\nExcess Deaths"),
+           calcex = 0.8, # font size of center axis labels
+           title="Cluster 3 Profile")
+```
+
+#### All 3 Clusters Profiles Together
+```{r get all clusters data together, echo=FALSE}
+table <- 
+  data2 %>% 
+  group_by(cluster) %>% 
+  summarise(`Personal Freedom` = median(persfreedomagency),
+            `Social Network` = median(Socialcapsocialnetwork),
+            `Assembly Freedom` = median(PersonalFreedom),
+            `Health Preventions` = median(healthprevent),
+            `Social & Civic Participartion` = median(Socialcapcivic),
+            `Government Effect` = median(GovernanGovernmeffect),
+            `Personal & Family Relationships` = median(Socialcappersonalandfamily),
+            #`population` = median(population),
+            `Population Density` = median(population_density),
+            `Median Age` = median(median_age),
+            `Aged 65 Older` = median(aged_65_older),
+            `GDP per capita` = median(gdp_per_capita),
+            `Life Expectancy` = median(life_expectancy))  %>% 
+  t() %>% 
+  round(digits = 2) %>% 
+  as.data.frame() 
+table <- table[-1,]
+colnames(table) <- c("Cluster 1", "Cluster 2", "Cluster 3")
+table2 <- 
+      rbind(`Number of Countries`=c(28,21,21),
+      table, 
+      `Dominate Climate Class`=c("Temperate (21)","Temperate (16)","Tropical (8) & Dry (8)"),
+      `Excess Death Class` = c("Class 1 (23)", "Class 3 (12) & Class 4 (6)", "Class 2 (14)"),
+      `Stringency Class` = c("Class 2 (14)", "Class 1 (7) & Class 3 (6)", "Class 1 (13)"))
+```
+
+```{r table, echo=FALSE}
+library(kableExtra)
+table2[2,3] <- cell_spec(table2[2,3], color = "white",background = "green",bold = T)
+table2[2,2] <- cell_spec(table2[2,2], color = "white",background = "red",bold = T)
+table2[3,1] <- cell_spec(table2[3,1], color = "white",background = "green",bold = T)
+table2[3,2] <- cell_spec(table2[3,2], color = "white",background = "red",bold = T)
+table2[4,2] <- cell_spec(table2[4,2], color = "white", background = "red",bold = T)
+table2[4,3] <- cell_spec(table2[4,3], color = "white", background = "green",bold = T)
+table2[6,2] <- cell_spec(table2[6,2], color = "white", background = "red",bold = T)
+table2[7,2] <- cell_spec(table2[7,2], color = "white", background = "red",bold = T)
+table2[7,3] <- cell_spec(table2[7,3], color = "white", background = "green",bold = T)
+#table2[8,2] <- cell_spec(table2[8,2], color = "white", background = "red",bold = T)
+table2[9,2] <- cell_spec(table2[9,2], color = "white", background = "red",bold = T)
+table2[9,3] <- cell_spec(table2[9,3], color = "white", background = "green",bold = T)
+table2[10,3] <- cell_spec(table2[10,3], color = "white", background = "green",bold = T)
+table2[11,3] <- cell_spec(table2[11,3], color = "white", background = "green",bold = T)
+table2[12,2] <- cell_spec(table2[12,2], color = "white", background = "red",bold = T)
+table2[12,3] <- cell_spec(table2[12,3], color = "white", background = "green",bold = T)
+table2[13,2] <- cell_spec(table2[13,2], color = "white", background = "red",bold = T)
+table2 %>% 
+  kbl(escape = F, booktabs = T) %>% 
+  kable_styling(bootstrap_options = "striped", position = "left")
+```
+
+
+```{r all clusters radarchart,echo=FALSE,fig.height=20, fig.width=40}
+par(mfrow = c(1, 3))
+radarchart(all_cluster1[-1],axistype=1,
+           # custom polygon
+           pcol = rgb(0.2,0.5,0.5,0.9), pfcol =rgb(0.2,0.5,0.5,0.5), plwd=10,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=5,
+           # custom labels
+           vlcex = 3.5, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPrevent","Civic\nand\n Social\nParticipation","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median\nAge","Aged\n65\nOlder","GDP\nper capita","Life\nExpectancy"),
+           calcex = 5 # font size of center axis labels
+           )
+
+radarchart(all_cluster2[-1],axistype=1,
+           # custom polygon
+           pcol = 4, pfcol =rgb(0, 0.4, 1, 0.25), plwd=10,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=5,
+           # custom labels
+           vlcex = 3.5, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPrevent","Civic\nand\n Social\nParticipation","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median\nAge","Aged\n65\nOlder","GDP\nper capita","Life\nExpectancy"),
+           calcex = 5 # font size of center axis labels
+           )
+
+radarchart(all_cluster3[-1],axistype=1,
+           # custom polygon
+           pcol = rgb(1, 0.4, 0.6, 0.9), pfcol =rgb(1, 0.4, 0.6, 0.25), plwd=10,
+           # custom grid
+           cglcol = "grey", cglty = 1, axislabcol = "grey", caxislabels = c(0,0.25,0.5,0.75,1), cglwd=5,
+           # custom labels
+           vlcex = 3.5, # font size for labels
+           vlabels = c("Personal\nFreedom","Social\nNetwork","Assembly\nFreedom", "Health\nPrevent","Civic\nand\n Social\nParticipation","Government\nEffectiveness","Personal\nRelationships","Population","Population\nDensity","Median\nAge","Aged\n65\nOlder","GDP\nper capita","Life\nExpectancy"),
+           calcex = 5 # font size of center axis labels
+           )
+```
+
+
+## Multinomial Regression (DV -- membership)
+
+### Model Summary
+```{r split train test, echo=TRUE}
+library(rsample)
+data2$cluster <- relevel(as.factor(data2$cluster), ref = 2)
+#data3 <- cbind(data2[c(2,3,17,18)], data2_mat[-1])
+data_split <- initial_split(data2, prop = .75)
+data_train <- training(data_split)[-1]
+data_test <- testing(data_split)[-1]
+```
+
+
+```{r multi-nomial regression, echo=TRUE}
+library(nnet)
+# Run a "only intercept" model
+OIM <- multinom(cluster ~ 1, data = data_train)
+summary(OIM)
+model <- multinom(cluster ~ ., data = data_train)
+summary(model)
+```
+
+### Interpretation of the Model Fit information
+```{r interpret model fit}
+# Compare the our test model with the "Only intercept" model
+anova(OIM,model)
+```
+
+### Get p-values
+```{r get p-values, echo=TRUE}
+# Calculate z-score for the model (wald Z)
+zvalues <- summary(model)$coefficients / summary(model)$standard.errors
+# Calculate p-values
+#pnorm(abs(zvalues), lower.tail = FALSE)*2
+# 2-tailed z test
+p <- (1 - pnorm(abs(zvalues), 0, 1)) * 2
+p
+```
+
+### Training test accuracy %
+```{r predicting train data, echo=TRUE}
+# predicting values for train dataset
+data_train$cluster_predicted <- predict(model, newdata = data_train, "class")
+# building classification table
+tab_train <- table(data_train$cluster, data_train$cluster_predicted)
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tab_train))/sum(tab_train))*100,2)
+```
+
+### Test set accuracy %
+```{r predicting test data, echo=TRUE}
+data_test$cluster_predicted <- predict(model, newdata = data_test, "class")
+tab_test <- table(data_test$cluster, data_test$cluster_predicted)
+round((sum(diag(tab_test))/sum(tab_test))*100,2)
+```
+
+```{r test goodness of fit}
+chisq.test(data_test$cluster, data_test$cluster_predicted)
+```
+
+### Exponentiate model coefficients
+```{r, echo=TRUE}
+## extract the coefficients from the model and exponentiate
+exp(coef(model))
+```
+
+```{r, eval=FALSE}
+write_csv(data2,"data/cluster_output.csv")
+write_csv(data_test, "data/test_output.csv")
+write_csv(data_train, "data/train_output.csv")
+```
+
+```{r}
+length(unique(data2$location))
+```
+
