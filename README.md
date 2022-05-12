@@ -2,20 +2,18 @@
 
 ## DESCRIPTION:
 
-This is a capstone research project for the Certificate in Applied Data Science (CADS) at my undergraduate institution, Wesleyan University, on the topic of "Understanding the Variances in COVID-19 Pandemic Outcome - Excess Mortality - with Social, Cultural, and Environmental Factors".
-
-<img src="fig.png" align="right" height="180"/>
+This is a capstone research project for the Certificate in Applied Data Science (CADS) at my undergraduate institution, Wesleyan University, on the topic of "Understanding the Variances in COVID-19 Pandemic Outcome - Excess Mortality - with Social, Cultural, and Environmental Factors".<img src="fig.png" align="right" height="180"/>
 
 ### AUTHOR: Jiner Zheng
 
 ### Faculty Sponsor: Prof. Maryam Gooyabadi
 
 ## Useful Code Sources:
--   [DTW.Rmd](https://github.com/Cyanjiner/JZ-capstone/blob/main/DTW.Rmd) contains code for data cleaning, data management, functions of producing excess deaths using ARIMA/GARCH, & implementations of hierarchical clustering analyses on Time Series data based on Euclidean distances and Dynamic Time Warping (DTW) distances.
+-   [DTW.Rmd](https://github.com/Cyanjiner/CADS-Capstone/blob/main/DTW.Rmd) contains code for data cleaning, data management, functions of producing excess deaths using ARIMA/GARCH, & implementations of hierarchical clustering analyses on Time Series data based on Euclidean distances and Dynamic Time Warping (DTW) distances.
 
--   [K-medoids.Rmd](https://github.com/Cyanjiner/JZ-capstone/blob/main/K-medoids.Rmd) contains code for implementing K-Medoids clustering on mix-typed data with computations of the Gower distance.
+-   [K-medoids.Rmd](https://github.com/Cyanjiner/CADS-Capstone/blob/main/K-medoids.Rmd) contains code for implementing K-Medoids clustering on mix-typed data with computations of the Gower distance.
 
-Note: you can also set up the environment using [JZ-capstone.Rproj](https://github.com/Cyanjiner/JZ-capstone/blob/main/JZ-capstone.Rproj) in R.
+Note: you can also set up the environment using [JZ-capstone.Rproj](https://github.com/Cyanjiner/CADS-Capstone/blob/main/JZ-capstone.Rproj) in R.
 
 ## Other Materials:
 
