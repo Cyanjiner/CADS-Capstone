@@ -17,6 +17,6 @@ Note: you can also set up the environment using [JZ-capstone.Rproj](https://gith
 
 ## Other Materials:
 
--   [JZ-capstone.pdf](https://github.com/Cyanjiner/JZ-capstone/blob/main/JZ-capstone.pdf) contains my presentation slides outlining our literature reviews, measures and analytical methods, findings, and recommendations.
+-   [JZ-capstone.pdf](https://github.com/Cyanjiner/CADS-Capstone/blob/main/JZ-capstone.pdf) contains my presentation slides outlining our literature reviews, measures and analytical methods, findings, and recommendations.
 
--   [JZ_CADS_capstone_spring2022.pdf](https://github.com/Cyanjiner/JZ-capstone/blob/main/JZ_CADS_capstone_spring2022.pdf) is the final paper of this presented work.
+-   [JZ_CADS_capstone_spring2022.pdf](https://github.com/Cyanjiner/CADS-Capstone/blob/main/JZ_CADS_capstone_spring2022.pdf) is the final paper of this presented work.
