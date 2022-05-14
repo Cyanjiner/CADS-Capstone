@@ -1,0 +1,68 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r load data}
+library(mclust)
+library(factoextra)
+country_profile <- read.csv("data/covid_no_ts_all.csv")[,-1]
+```
+
+
+```{r clustering, eval=FALSE, echo=FALSE}
+# model based clustering based on parameterized finite Gaussian mixture models (models estimated by EM algorithm initialized by hierarchical modelbased agglomerative clustering & optimal model selected by BIC)
+test_data = dplyr::select(covid_no_ts_all,-c("iso_code","continent","Climatezone","Climateclass","meanjantemp2017","Zonecharacter")) %>% na.omit()
+cluster_model <- Mclust(test_data[-1])
+# optimal selected model
+cluster_model$modelName
+# optimal number of cluster
+cluster_model$G
+
+# probality for an observation to be in a given cluster
+head(cluster_model$z)
+
+# get probabilities, means, variances
+summary(cluster_model, parameters = TRUE)
+
+plot(cluster_model, what=c("classification"))
+```
+
+```{r, eval=FALSE, echo=FALSE}
+fviz_mclust(cluster_model, "classification", geom = "point")
+```
+```{r, eval=FALSE, echo=FALSE}
+dt <- as.data.frame(cbind(test_data$location,cluster_model$classification))
+colnames(dt) <- c("location","cluster-type1")
+test_data <- inner_join(dt,test_data, by="location")
+cluster_model$parameters$mean
+```
+
+```{r cluster density, eval=FALSE, echo=FALSE}
+plot(cluster_model,"density")
+```
+
+```{r, eval=FALSE, echo=FALSE}
+test_data_scaled <- scale(test_data[-1])
+#compute dissimilarity matrix
+# Enhanced k-means clustering
+cluster_model2 <- eclust(test_data_scaled, "kmeans", nstart = 25)
+```
+
+```{r}
+dt2 <- as.data.frame(cbind(test_data$location,cluster_model2$cluster))
+colnames(dt2) <- c("location","cluster-type2")
+test_data <- inner_join(dt2,test_data, by="location")
+cluster_model2$centers
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+distance <- get_dist(scale(test_data[-1])) # Euclidean distance
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
