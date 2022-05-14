@@ -1,12 +1,12 @@
 # Socio-economic, cultural, and environmental influences on COVID-19 pandemic
 
 ## DESCRIPTION:
-<img src="fig.png" align="right" height="180"/>
+
 This is a capstone research project for the Certificate in Applied Data Science (CADS) at my undergraduate institution, Wesleyan University, on the topic of "Understanding the Variances in COVID-19 Pandemic Outcome - Excess Mortality - with Social, Cultural, and Environmental Factors".
+<img src="fig.png" align="right" />
 
-### AUTHOR: Jiner Zheng
-
-### Faculty Sponsor: Prof. Maryam Gooyabadi
+-   **AUTHOR:** Jiner Zheng
+-   **FACULTY SPONSOR:** Prof. Maryam Gooyabadi
 
 ## Useful Code Sources:
 
