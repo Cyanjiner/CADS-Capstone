@@ -1,4 +1,4 @@
-# Socio-economic, cultural, and environmental influences on COVID-19 pandemic
+# Socio-economic, cultural, and environmental influences on COVID-19 pandemic outcome -- excess mortality
 
 ## DESCRIPTION:
 
